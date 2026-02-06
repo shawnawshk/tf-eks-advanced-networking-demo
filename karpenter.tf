@@ -149,7 +149,7 @@ resource "kubectl_manifest" "karpenter_node_pool" {
             operator: In
             values: [ "nitro" ]
       limits:
-        cpu: 75000
+        cpu: 150000
       disruption:
         consolidationPolicy: WhenEmpty
         consolidateAfter: 300s
