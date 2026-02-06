@@ -79,6 +79,8 @@ resource "kubectl_manifest" "karpenter_node_class" {
   spec:
     amiSelectorTerms:
     - alias: al2023@latest
+    kubelet:
+      maxPods: 216
     instanceStorePolicy: RAID0
     blockDeviceMappings:
     - deviceName: /dev/xvda
