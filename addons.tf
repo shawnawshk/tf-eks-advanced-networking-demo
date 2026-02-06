@@ -24,15 +24,55 @@ module "eks_blueprints_addons" {
         name  = "vpcId" # explicitly set the vpcId, otherwise it may not able to retrieve the vpcId from the node
         value = module.vpc.vpc_id
       },
-      {
-        name  = "controllerConfig.featureGates.ALBGatewayAPI"
-        value = "true"
-      },
-      {
-        name  = "controllerConfig.featureGates.NLBGatewayAPI"
-        value = "true"
-      },
     ]
+  }
+
+  enable_ingress_nginx = false # as an example of the load balancer use case
+  ingress_nginx = {
+    chart_version = "4.12.1"
+    values = [yamlencode({
+      controller = {
+        metrics = {
+          enabled = true
+          serviceMonitor = {
+            enabled = false
+            additionalLabels = {
+              release = "kube-prometheus-stack"
+            }
+          }
+        }
+        podAnnotations = {
+          "prometheus.io/port"   = "10254"
+          "prometheus.io/scrape" = "true"
+        }
+        service = {
+          type                  = "LoadBalancer"
+          externalTrafficPolicy = "Local"
+          annotations = {
+            "service.beta.kubernetes.io/aws-load-balancer-type"             = "external"
+            "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"  = "ip" # ip mode still works in custom networking
+            "service.beta.kubernetes.io/aws-load-balancer-backend-protocol" = "tcp"
+            "service.beta.kubernetes.io/aws-load-balancer-scheme"           = "internet-facing"
+            "service.beta.kubernetes.io/aws-load-balancer-ssl-ports"        = "443"
+          }
+          targetPorts = {
+            http  = "http"
+            https = "http"
+          }
+        }
+        autoscaling = {
+          enabled     = true
+          minReplicas = 2
+          maxReplicas = 10
+        }
+        resources = {
+          requests = {
+            cpu    = "500m"
+            memory = "256Mi"
+          }
+        }
+      }
+    })]
   }
 
   enable_aws_efs_csi_driver = true
