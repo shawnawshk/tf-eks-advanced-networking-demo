@@ -14,7 +14,6 @@ module "vpc" {
   secondary_cidr_blocks = var.secondary_cidrs
 
   enable_nat_gateway = true
-  single_nat_gateway = true
 
   enable_dns_hostnames = true
   enable_dns_support   = true
