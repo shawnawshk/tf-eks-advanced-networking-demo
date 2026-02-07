@@ -28,13 +28,10 @@ resource "helm_release" "karpenter" {
   namespace        = local.namespace
   create_namespace = true
   repository       = "oci://public.ecr.aws/karpenter"
-  # To avoid 403 error from public ECR
-  # ref: https://github.com/aws/karpenter-provider-aws/issues/6357
-  repository_username = data.aws_ecrpublic_authorization_token.token.user_name
-  repository_password = data.aws_ecrpublic_authorization_token.token.password
-  chart               = "karpenter"
-  version             = "1.6.1"
-  wait                = false
+
+  chart   = "karpenter"
+  version = "1.6.1"
+  wait    = false
 
   values = [
     <<-EOT
@@ -92,7 +89,7 @@ resource "kubectl_manifest" "karpenter_node_class" {
     subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: ${module.eks.cluster_name}
-        secondary-cidr: "1"
+        kubernetes.io/role/internal-elb: "1"
     securityGroupSelectorTerms:
     - tags:
         karpenter.sh/discovery: ${module.eks.cluster_name}

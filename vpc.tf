@@ -27,8 +27,7 @@ module "vpc" {
   }
 
   intra_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = 1
-    "secondary-cidr"                  = 1
+    "secondary-cidr" = 1
   }
 
   tags = local.tags
