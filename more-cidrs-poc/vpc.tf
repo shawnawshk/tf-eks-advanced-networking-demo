@@ -27,7 +27,8 @@ module "vpc" {
   }
 
   intra_subnet_tags = {
-    "secondary-cidr" = 1
+    "secondary-cidr"         = 1
+    "kubernetes.io/role/pod" = 1
   }
 
   tags = local.tags

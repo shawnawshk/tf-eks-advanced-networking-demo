@@ -24,4 +24,3 @@ override.tf.json
 *.tfstate*
 planfile
 *tfvars
-plan.out

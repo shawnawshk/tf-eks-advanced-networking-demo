@@ -1,0 +1,84 @@
+graph TD
+    classDef networking fill:#1a73e8,stroke:#1558b0,color:#fff
+    classDef compute fill:#e8710a,stroke:#b85a08,color:#fff
+    classDef k8s fill:#326ce5,stroke:#264da3,color:#fff
+    classDef addon fill:#34a853,stroke:#2d8a46,color:#fff
+    classDef data fill:#9e9e9e,stroke:#757575,color:#fff
+
+    %% Data Sources
+    AZS["data.aws_availability_zones"]:::data
+    ECR["data.aws_ecrpublic_authorization_token"]:::data
+
+    %% Networking Layer
+    VPC["module.vpc<br/><i>VPC + Subnets + NAT GW</i><br/>vpc.tf"]:::networking
+
+    %% EKS Cluster Layer
+    EKS["module.eks<br/><i>EKS Cluster + Addons + Fargate Profiles</i><br/>eks.tf"]:::compute
+
+    %% EKS Addons (inside module.eks)
+    VPC_CNI["vpc-cni addon<br/><i>Custom Networking + Prefix Delegation</i><br/><b>before_compute = true</b>"]:::k8s
+    COREDNS["coredns addon<br/><i>Fargate + AutoScaling</i>"]:::k8s
+    KUBEPROXY["kube-proxy addon<br/><i>IPVS mode</i>"]:::k8s
+    PODID["eks-pod-identity-agent"]:::k8s
+
+    %% Fargate Profiles (inside module.eks)
+    FG_KARPENTER["fargate_profile: karpenter"]:::compute
+    FG_COREDNS["fargate_profile: coredns"]:::compute
+
+    %% ENIConfig Layer
+    ENICONFIG["kubectl_manifest.eniconfig<br/><i>ENIConfig CRDs x6 AZs</i><br/>eniconfig.tf"]:::k8s
+
+    %% Node Groups Layer
+    NODEGROUP["module.eks_managed_node_group<br/><i>ng-1: 2x m5.8xlarge</i><br/>node_groups.tf"]:::compute
+
+    %% Karpenter Layer
+    KARPENTER_MOD["module.karpenter<br/><i>IAM Roles + SQS Queue</i><br/>karpenter.tf"]:::addon
+    KARPENTER_HELM["helm_release.karpenter<br/><i>Karpenter v1.6.1</i><br/>karpenter.tf"]:::addon
+    KARPENTER_NC["kubectl_manifest.karpenter_node_class<br/><i>EC2NodeClass: al2023</i><br/>karpenter.tf"]:::k8s
+    KARPENTER_NP["kubectl_manifest.karpenter_node_pool<br/><i>NodePool: Graviton instances</i><br/>karpenter.tf"]:::k8s
+
+    %% Blueprints Addons Layer
+    BLUEPRINTS["module.eks_blueprints_addons<br/><i>ALB Controller + EFS CSI + metrics-server</i><br/>addons.tf"]:::addon
+
+    %% Dependencies - Networking
+    AZS --> VPC
+
+    %% Dependencies - EKS Cluster
+    VPC -->|"vpc_id, subnet_ids"| EKS
+    EKS --- VPC_CNI
+    EKS --- COREDNS
+    EKS --- KUBEPROXY
+    EKS --- PODID
+    EKS --- FG_KARPENTER
+    EKS --- FG_COREDNS
+
+    %% Dependencies - ENIConfig (implicit via cluster_primary_security_group_id)
+    EKS -->|"cluster_primary_sg_id"| ENICONFIG
+    VPC -->|"intra_subnets"| ENICONFIG
+
+    %% Dependencies - Node Groups (explicit depends_on ENIConfig)
+    ENICONFIG ==>|"depends_on"| NODEGROUP
+    EKS -->|"cluster_name, version, sg, service_cidr"| NODEGROUP
+
+    %% Dependencies - Karpenter Module
+    EKS -->|"cluster_name, oidc_provider_arn"| KARPENTER_MOD
+
+    %% Dependencies - Karpenter Helm
+    KARPENTER_MOD -->|"queue_name, iam_role_arn"| KARPENTER_HELM
+    EKS -->|"cluster_name, cluster_endpoint"| KARPENTER_HELM
+    ECR -->|"auth token"| KARPENTER_HELM
+
+    %% Dependencies - Karpenter CRDs
+    KARPENTER_HELM ==>|"depends_on"| KARPENTER_NC
+    EKS -->|"cluster_name"| KARPENTER_NC
+    KARPENTER_HELM ==>|"depends_on"| KARPENTER_NP
+    KARPENTER_NC ==>|"depends_on"| KARPENTER_NP
+
+    %% Dependencies - Blueprints Addons
+    EKS ==>|"depends_on"| BLUEPRINTS
+    EKS -->|"cluster_name, endpoint, version, oidc_arn"| BLUEPRINTS
+    VPC -->|"vpc_id"| BLUEPRINTS
+
+    %% Styling for critical path
+    linkStyle 11 stroke:#ff0000,stroke-width:3px
+    linkStyle 13 stroke:#ff0000,stroke-width:3px

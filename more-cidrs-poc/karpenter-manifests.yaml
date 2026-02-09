@@ -1,0 +1,81 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  amiSelectorTerms:
+  - alias: al2023@latest
+  kubelet:
+    maxPods: 216
+  instanceStorePolicy: RAID0
+  blockDeviceMappings:
+  - deviceName: /dev/xvda
+    ebs:
+      encrypted: true
+      volumeSize: 500Gi
+      volumeType: gp3
+  role: eks-networking
+  subnetSelectorTerms:
+  - tags:
+      karpenter.sh/discovery: eks-networking
+      kubernetes.io/role/internal-elb: "1"
+  securityGroupSelectorTerms:
+  - tags:
+      karpenter.sh/discovery: eks-networking
+  tags:
+    karpenter.sh/discovery: eks-networking
+---
+# NOTE: For demo purposes, only one NodePool is shown here. In production, create multiple
+# NodePools per AZ (up to 8) with different ENIConfig indices to spread pods across all
+# available subnets. See karpenter.tf for the per-AZ NodePool implementation.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  template:
+    metadata:
+      labels:
+        testing: "true"
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: default
+      requirements:
+      - key: node.kubernetes.io/instance-type
+        operator: In
+        values:
+        - m6g.8xlarge
+        - m6g.12xlarge
+        - m6g.16xlarge
+        - m7g.8xlarge
+        - m7g.16xlarge
+        - m8g.8xlarge
+        - m8g.12xlarge
+        - m8g.16xlarge
+        - m8g.24xlarge
+        - m8g.48xlarge
+        - r6g.8xlarge
+        - r6g.12xlarge
+        - r6g.16xlarge
+        - r7g.8xlarge
+        - r7g.12xlarge
+        - r7g.16xlarge
+        - r8g.8xlarge
+        - r8g.12xlarge
+        - r8g.16xlarge
+        - r8g.24xlarge
+      - key: karpenter.sh/capacity-type
+        operator: In
+        values:
+        - on-demand
+      - key: karpenter.k8s.aws/instance-hypervisor
+        operator: In
+        values:
+        - nitro
+  limits:
+    cpu: 150000
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 300s

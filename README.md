@@ -1,105 +1,55 @@
-# EKS with VPC CNI Custom Networking
+# EKS Advanced Networking Demo
 
-Terraform configuration for deploying an Amazon EKS cluster with VPC CNI custom networking using secondary CIDR blocks. This setup separates node IPs (primary CIDR) from pod IPs (secondary CIDRs) to maximize available IP addresses for pods.
+Terraform configurations demonstrating two approaches to Amazon EKS pod networking with secondary CIDR blocks. Both solve the same problem -- separating node IPs from pod IPs to maximize available IP addresses -- but differ in complexity and operational overhead.
 
-## Architecture
+## Use Cases
 
-```
-VPC (10.8.0.0/16)
-├── Primary CIDR: 10.8.0.0/16
-│   ├── Private Subnets (6x /20) - Node IPs, EKS control plane
-│   └── Public Subnets  (6x /20) - Load balancers, NAT gateways
-├── Secondary CIDR: 100.64.0.0/16
-│   ├── us-east-1a: 100.64.0.0/17   (intra subnet - Pod IPs)
-│   └── us-east-1b: 100.64.128.0/17
-├── Secondary CIDR: 100.65.0.0/16
-│   ├── us-east-1c: 100.65.0.0/17
-│   └── us-east-1d: 100.65.128.0/17
-└── Secondary CIDR: 100.66.0.0/16
-    ├── us-east-1e: 100.66.0.0/17
-    └── us-east-1f: 100.66.128.0/17
-```
+### 1. [Multi-CIDR Custom Networking](./multi-cidr-custom-networking/)
 
-### Resource Dependency Chain
+The traditional approach using **ENIConfig CRDs** to map each Availability Zone to a specific secondary CIDR subnet for pod IPs.
 
-The deployment order is critical for VPC CNI custom networking to work correctly:
+- **How it works**: VPC CNI custom networking is enabled (`AWS_VPC_K8S_CNI_CUSTOM_NETWORK_CFG=true`) and an ENIConfig resource is created per AZ. Each ENIConfig tells the CNI which secondary subnet to use for pod ENIs. When a node launches, the CNI reads the node's AZ label, finds the matching ENIConfig, and assigns pod IPs from the corresponding secondary CIDR subnet.
+- **Secondary CIDRs**: RFC 6598 space (`100.64.0.0/16`, `100.65.0.0/16`, `100.66.0.0/16`)
+- **Key detail**: Node groups must be created _after_ ENIConfig CRDs exist, requiring careful dependency ordering (`depends_on`). Nodes that launch before ENIConfigs are in place will fail with `NetworkPluginNotReady`.
+- **Pod subnets**: Intra subnets (no NAT route) -- pods are isolated from direct internet routing.
 
-```
-VPC + Subnets
-  → EKS Cluster + VPC CNI Addon (with custom networking enabled)
-    → ENIConfig CRDs (one per AZ, mapping to secondary CIDR subnets)
-      → Managed Node Groups (nodes join with CNI already configured)
-        → Addons (ALB Controller, EFS CSI, Karpenter, etc.)
-```
+### 2. [Enhanced Subnet Discovery with Tags](./enhanced-subnet-discovery-with-tags/)
 
-Node groups are created as a **standalone module** (not inside `module.eks`) to enforce this ordering via `depends_on`. Without this, nodes would launch before ENIConfigs exist, causing the CNI to fail with `NetworkPluginNotReady`.
+A simpler, more modern approach that eliminates ENIConfig CRDs entirely. The VPC CNI **auto-discovers** pod subnets using the `kubernetes.io/role/cni: 1` tag.
 
-## Files
+- **How it works**: VPC CNI subnet discovery is enabled (`ENABLE_SUBNET_DISCOVERY=true`). The CNI finds subnets tagged with `kubernetes.io/role/cni: 1` in the node's AZ and uses them for pod networking automatically -- no CRDs, no per-AZ mapping.
+- **Secondary CIDRs**: RFC 1918 space (`10.1.0.0/16`, `10.2.0.0/16`, `10.3.0.0/16`)
+- **Key detail**: No special dependency ordering needed for node groups. Tag the subnets and the CNI handles the rest.
+- **Pod subnets**: Regular private subnets (routable via NAT) -- pods can reach the internet through NAT gateways.
 
-| File | Description |
-|---|---|
-| `main.tf` | Provider configuration, locals, AZ/subnet calculations |
-| `vpc.tf` | VPC module with primary and secondary CIDRs |
-| `eks.tf` | EKS cluster, addons (VPC CNI, CoreDNS, kube-proxy), Fargate profiles |
-| `eniconfig.tf` | ENIConfig CRDs for VPC CNI custom networking |
-| `node_groups.tf` | Managed node group (separated from EKS module for dependency ordering) |
-| `addons.tf` | EKS Blueprints addons (ALB Controller, EFS CSI, metrics-server) |
-| `karpenter.tf` | Karpenter module, Helm release, EC2NodeClass, and NodePool |
-| `variables.tf` | Input variables |
-| `outputs.tf` | Output values |
+## Comparison
 
-## VPC CNI Custom Networking
+| | Multi-CIDR Custom Networking | Enhanced Subnet Discovery |
+|---|---|---|
+| ENIConfig CRDs | 1 per AZ (required) | Not needed |
+| CNI config | `CUSTOM_NETWORK_CFG` + `ENI_CONFIG_LABEL_DEF` | `ENABLE_SUBNET_DISCOVERY` |
+| Subnet selection | Explicit per-AZ mapping in CRD | Tag-based auto-discovery |
+| Dependency ordering | Node groups depend on ENIConfig | No special dependency |
+| Pod subnet routing | Intra (non-routable) | Private (routable via NAT) |
 
-Custom networking is enabled via the VPC CNI addon configuration:
+## Common Across Both
 
-- `AWS_VPC_K8S_CNI_CUSTOM_NETWORK_CFG = "true"` - Enables custom networking
-- `ENI_CONFIG_LABEL_DEF = "topology.kubernetes.io/zone"` - Auto-selects ENIConfig by node AZ
-- `ENABLE_PREFIX_DELEGATION = "true"` - Assigns /28 prefixes instead of individual IPs for higher pod density
-
-Each AZ has an ENIConfig that maps to the corresponding intra subnet (secondary CIDR). When a node launches, the VPC CNI:
-1. Reads the node's AZ label
-2. Finds the matching ENIConfig
-3. Creates secondary ENIs in the specified secondary CIDR subnet
-4. Assigns pod IPs from that subnet
-
-## Karpenter
-
-Karpenter runs on Fargate (via Fargate profiles) and manages Graviton-based node pools:
-
-- **EC2NodeClass**: Uses `al2023@latest` AMI, targets subnets tagged with `secondary-cidr: 1`
-- **NodePool**: Graviton instances (m6g/m7g/m8g/r6g/r7g/r8g), on-demand, Nitro hypervisor, 75k vCPU limit
-- **Authentication**: IRSA (Fargate does not support Pod Identity)
+- EKS v1.35 with Fargate profiles for Karpenter and CoreDNS
+- Prefix delegation enabled (`ENABLE_PREFIX_DELEGATION=true`) for higher pod density
+- Karpenter managing Graviton instance pools (m6g/m7g/m8g/r6g/r7g/r8g)
+- Addons: VPC CNI, CoreDNS, kube-proxy (IPVS), AWS Load Balancer Controller, EFS CSI Driver, metrics-server
 
 ## Prerequisites
 
 - Terraform >= 1.3
 - AWS CLI configured with appropriate credentials
-- `kubectl` installed
-- `helm` installed
+- `kubectl` and `helm` installed
 
 ## Usage
 
 ```bash
+cd multi-cidr-custom-networking   # or enhanced-subnet-discovery-with-tags
 terraform init
 terraform plan -out=tfplan
-terraform apply "tfplan"
-
-# Update kubeconfig
-aws eks update-kubeconfig --region us-east-1 --name eks-networking
+terraform apply tfplan
 ```
-
-## Variables
-
-| Name | Description | Default |
-|---|---|---|
-| `region` | AWS region | `us-east-1` |
-| `name` | Name prefix for resources | `eks-networking` |
-| `vpc_cidr` | Primary VPC CIDR block | `10.8.0.0/16` |
-| `secondary_cidrs` | Secondary CIDR blocks for pod networking | `["100.64.0.0/16", "100.65.0.0/16", "100.66.0.0/16"]` |
-| `tags` | Tags to apply to all resources | `{}` |
-
-## Notes
-
-- **us-east-1e**: EKS control plane does not support this AZ. The cluster uses 5 AZs (a,b,c,d,f) while the VPC spans all 6. Worker nodes can still run in us-east-1e via Karpenter.
-- **NAT Gateway**: Configured with a single NAT gateway. Change `single_nat_gateway = false` in `vpc.tf` for one NAT per AZ (higher availability, higher cost).
-- **Secondary CIDRs**: Uses RFC 6598 `100.64.0.0/10` range. Each /16 CIDR provides two /17 subnets (~32k IPs each), totaling ~196k pod IPs across all 6 AZs.

@@ -31,6 +31,7 @@ module "eks" {
           WARM_PREFIX_TARGET                 = "1"
           AWS_VPC_K8S_CNI_CUSTOM_NETWORK_CFG = "true"
           ENI_CONFIG_LABEL_DEF               = "topology.kubernetes.io/zone"
+          # ENABLE_SUBNET_DISCOVERY            = "true"
         }
       })
     }
