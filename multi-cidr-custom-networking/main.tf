@@ -14,6 +14,10 @@ terraform {
       source  = "gavinbunney/kubectl"
       version = ">= 1.14"
     }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = ">= 2.20"
+    }
   }
 }
 
@@ -72,26 +76,3 @@ data "aws_availability_zones" "available" {
     values = ["opt-in-not-required"]
   }
 }
-locals {
-  azs = slice(data.aws_availability_zones.available.names, 0, 6)
-
-  # Primary CIDR subnets (10.8.0.0/16) - 6x /20
-  private_subnets = [for i in range(6) : cidrsubnet(var.vpc_cidr, 4, i)]
-  public_subnets  = [for i in range(6) : cidrsubnet(var.vpc_cidr, 4, i + 6)]
-
-  # Secondary CIDR subnets - 2 AZs per secondary CIDR, one /17 per AZ
-  # 100.64.0.0/16 -> AZ a,b | 100.65.0.0/16 -> AZ c,d | 100.66.0.0/16 -> AZ e,f
-  intra_subnets = flatten([
-    for cidr in var.secondary_cidrs : [
-      cidrsubnet(cidr, 1, 0),
-      cidrsubnet(cidr, 1, 1),
-    ]
-  ])
-
-  # EKS control plane does not support us-east-1e
-  eks_private_subnet_ids = [
-    for i, subnet in module.vpc.private_subnets : subnet
-    if local.azs[i] != "us-east-1e"
-  ]
-}
-

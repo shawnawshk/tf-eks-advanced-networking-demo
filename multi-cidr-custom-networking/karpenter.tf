@@ -1,10 +1,6 @@
-locals {
-  namespace = "karpenter"
-}
-
 module "karpenter" {
   source  = "terraform-aws-modules/eks/aws//modules/karpenter"
-  version = "~> 20.24"
+  version = "~> 20.31"
 
   cluster_name          = module.eks.cluster_name
   enable_v1_permissions = true
@@ -31,7 +27,8 @@ resource "helm_release" "karpenter" {
 
   chart   = "karpenter"
   version = "1.6.1"
-  wait    = false
+  wait    = true
+  timeout = 600 # Fargate cold start can take 1-2 min; 10 min gives sufficient headroom
 
   values = [
     <<-EOT
@@ -66,7 +63,7 @@ resource "helm_release" "karpenter" {
 ################################################################################
 
 resource "kubectl_manifest" "karpenter_node_class" {
-  depends_on = [helm_release.karpenter]
+  depends_on = [helm_release.karpenter, kubectl_manifest.eniconfig]
 
   yaml_body = <<-YAML
   apiVersion: karpenter.k8s.aws/v1
@@ -86,6 +83,9 @@ resource "kubectl_manifest" "karpenter_node_class" {
         volumeSize: 500Gi
         volumeType: gp3
     role: ${module.eks.cluster_name}
+    # Nodes are placed in primary CIDR private subnets (10.8.x.x, tagged kubernetes.io/role/internal-elb).
+    # Pod IPs come from secondary CIDRs (100.64-66.x.x) via ENIConfig — that is controlled by VPC CNI, not Karpenter.
+    # Do NOT change this to secondary-cidr subnets; intra subnets have no NAT route and node bootstrap will fail.
     subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: ${module.eks.cluster_name}

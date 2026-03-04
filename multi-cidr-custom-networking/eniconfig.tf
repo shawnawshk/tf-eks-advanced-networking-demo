@@ -12,7 +12,7 @@ resource "kubectl_manifest" "eniconfig" {
       name = each.key
     }
     spec = {
-      securityGroups = [module.eks.cluster_primary_security_group_id]
+      securityGroups = local.eniconfig_security_group_ids
       subnet         = each.value
     }
   })

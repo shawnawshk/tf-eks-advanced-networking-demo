@@ -9,8 +9,8 @@ module "eks_blueprints_addons" {
   # disable the Telemetry from AWS using CloudFormation
   observability_tag = null
 
-  # Ensure node group is created before deploying addons that need compute
-  depends_on = [module.eks]
+  # Ensure NodePool exists so Karpenter can provision nodes for addon pods to schedule on
+  depends_on = [module.eks, kubectl_manifest.karpenter_node_pool]
 
   eks_addons = {
     metrics-server = { most_recent = true }

@@ -66,7 +66,7 @@ Each AZ has an ENIConfig that maps to the corresponding intra subnet (secondary 
 
 Karpenter runs on Fargate (via Fargate profiles) and manages Graviton-based node pools:
 
-- **EC2NodeClass**: Uses `al2023@latest` AMI, targets subnets tagged with `secondary-cidr: 1`
+- **EC2NodeClass**: Uses `al2023@latest` AMI, targets **primary CIDR private subnets** tagged with `kubernetes.io/role/internal-elb: "1"` (10.8.x.x). Pod IPs come from secondary CIDRs via ENIConfig — that routing is handled by VPC CNI, not Karpenter.
 - **NodePool**: Graviton instances (m6g/m7g/m8g/r6g/r7g/r8g), on-demand, Nitro hypervisor, 75k vCPU limit
 - **Authentication**: IRSA (Fargate does not support Pod Identity)
 

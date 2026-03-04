@@ -1,10 +1,3 @@
-locals {
-  name = var.name
-  tags = {
-    "karpenter.sh/discovery" : local.name
-  }
-}
-
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.31"
@@ -39,6 +32,10 @@ module "eks" {
       enabled                     = true
       most_recent                 = true
       resolve_conflicts_on_update = "OVERWRITE"
+      # Apply addon config before Fargate profiles are created so the CoreDNS pod
+      # can schedule immediately when the Fargate profile becomes available,
+      # overlapping cold start with Fargate profile creation instead of waiting after.
+      before_compute              = true
       configuration_values = jsonencode({
         nodeSelector = {
           "eks.amazonaws.com/compute-type" = "fargate"
@@ -52,6 +49,8 @@ module "eks" {
           .:53 {
               errors
               health {
+                  # Extended to 10s (EKS default: 5s) to reduce DNS resolution
+                  # errors during CoreDNS pod replacement on Fargate rolling updates.
                   lameduck 10s
               }
               ready
