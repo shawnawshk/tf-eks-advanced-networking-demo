@@ -84,8 +84,8 @@ resource "helm_release" "karpenter" {
     controller:
       resources:
         limits:
-          cpu: 1
-          memory: 1Gi
+          cpu: 2
+          memory: 2Gi
     EOT
   ]
 
@@ -119,7 +119,7 @@ resource "kubectl_manifest" "karpenter_node_class" {
     - deviceName: /dev/xvda
       ebs:
         encrypted: true
-        volumeSize: 500Gi
+        volumeSize: 50Gi
         volumeType: gp3
     role: ${module.eks.cluster_name}
     subnetSelectorTerms:
