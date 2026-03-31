@@ -1,39 +1,73 @@
 locals {
-  namespace = "karpenter"
+  karpenter_namespace = "karpenter"
+  karpenter_version   = "1.9.0"
+}
+
+data "aws_iam_policy_document" "karpenter_irsa" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [module.eks.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${module.eks.oidc_provider}:sub"
+      values   = ["system:serviceaccount:${local.karpenter_namespace}:karpenter"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${module.eks.oidc_provider}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
 }
 
 module "karpenter" {
   source  = "terraform-aws-modules/eks/aws//modules/karpenter"
-  version = "~> 20.31"
+  version = "~> 21.15"
 
-  cluster_name          = module.eks.cluster_name
-  enable_v1_permissions = true
-  namespace             = local.namespace
+  cluster_name = module.eks.cluster_name
+  namespace    = local.karpenter_namespace
 
   # Name needs to match role name passed to the EC2NodeClass
   node_iam_role_use_name_prefix = false
   node_iam_role_name            = local.name
 
-  # EKS Fargate does not support pod identity
+  # EKS Fargate does not support pod identity; use IRSA instead
   create_pod_identity_association = false
-  enable_irsa                     = true
-  irsa_oidc_provider_arn          = module.eks.oidc_provider_arn
+  iam_role_source_assume_policy_documents = [
+    data.aws_iam_policy_document.karpenter_irsa.json
+  ]
 
   tags = local.tags
 }
 
+resource "helm_release" "karpenter_crd" {
+  name             = "karpenter-crd"
+  namespace        = local.karpenter_namespace
+  create_namespace = true
+  repository       = "oci://public.ecr.aws/karpenter"
+  chart            = "karpenter-crd"
+  version          = local.karpenter_version
+
+  lifecycle {
+    ignore_changes = [repository_password]
+  }
+}
 
 resource "helm_release" "karpenter" {
   name             = "karpenter"
-  namespace        = local.namespace
+  namespace        = local.karpenter_namespace
   create_namespace = true
   repository       = "oci://public.ecr.aws/karpenter"
 
-  chart               = "karpenter"
-  version             = "1.6.1"
-  repository_username = data.aws_ecrpublic_authorization_token.token.user_name
-  repository_password = data.aws_ecrpublic_authorization_token.token.password
-  wait                = false
+  chart   = "karpenter"
+  version = local.karpenter_version
+  wait    = true
 
   values = [
     <<-EOT

@@ -7,7 +7,7 @@ variable "region" {
 variable "name" {
   description = "Name prefix for resources"
   type        = string
-  default     = "enhanced-networking"
+  default     = "tf-enhanced-networking"
 }
 
 variable "vpc_cidr" {

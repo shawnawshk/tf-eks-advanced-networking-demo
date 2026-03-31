@@ -2,11 +2,10 @@
 
 module "eks_managed_node_group" {
   source  = "terraform-aws-modules/eks/aws//modules/eks-managed-node-group"
-  version = "~> 20.31"
+  version = "~> 21.15"
 
   name            = "ng-1"
-  cluster_name    = module.eks.cluster_name
-  cluster_version = module.eks.cluster_version
+  cluster_name = module.eks.cluster_name
 
   subnet_ids                        = local.eks_private_subnet_ids
   cluster_primary_security_group_id = module.eks.cluster_primary_security_group_id
